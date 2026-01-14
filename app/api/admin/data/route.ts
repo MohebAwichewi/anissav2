@@ -13,12 +13,16 @@ export async function GET() {
 // POST: Add a new product
 export async function POST(request: Request) {
   const body = await request.json()
+  
   const newProduct = await prisma.product.create({
     data: {
       name: body.name,
       price: parseFloat(body.price),
       category: body.category,
-      image: body.image,
+      stock: parseInt(body.stock || '0'), 
+      brand: body.brand,
+      // Updated to match schema (plural)
+      images: body.images, 
     },
   })
   return NextResponse.json(newProduct)

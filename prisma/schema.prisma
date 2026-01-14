@@ -7,17 +7,19 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// --- UPDATED PRODUCT MODEL ---
 model Product {
   id        Int      @id @default(autoincrement())
   name      String
   price     Float
   category  String
-  brand     String?  @default("M.A Tradition")
-  images    String   @db.Text
-  stock     Int      @default(10) 
+  stock     Int      @default(0)
+  brand     String?
+  images    String[] // Now supports multiple images (array)
   createdAt DateTime @default(now())
 }
 
+// --- OTHER MODELS (UNCHANGED) ---
 model Order {
   id        Int      @id @default(autoincrement())
   customer  String
@@ -42,12 +44,20 @@ model Admin {
 }
 
 model Category {
-  id    Int     @id @default(autoincrement())
-  name  String  @unique
+  id   Int    @id @default(autoincrement())
+  name String @unique
 }
 
 model GalleryImage {
   id        Int      @id @default(autoincrement())
   url       String   @db.Text
   createdAt DateTime @default(now())
+}
+
+model ContactMessage {
+  id    Int      @id @default(autoincrement())
+  name  String
+  email String
+  msg   String
+  date  DateTime @default(now())
 }

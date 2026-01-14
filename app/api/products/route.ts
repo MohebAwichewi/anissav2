@@ -3,68 +3,72 @@ import { PrismaClient } from '@prisma/client'
 
 const prisma = new PrismaClient()
 
+// 1. GET: Fetch all products
 export async function GET() {
   try {
-    const products = await prisma.product.findMany({ orderBy: { createdAt: 'desc' } })
-    const formatted = products.map(p => ({
-      ...p,
-      images: p.images ? JSON.parse(p.images) : []
-    }))
-    return NextResponse.json(formatted)
-  } catch (e) {
-    return NextResponse.json({ error: 'Failed to fetch' }, { status: 500 })
+    const products = await prisma.product.findMany({
+      orderBy: { createdAt: 'desc' }
+    })
+    
+    // FIX: Removed JSON.parse mapping because 'images' is now already an array (String[])
+    return NextResponse.json(products)
+    
+  } catch (error) {
+    return NextResponse.json({ error: 'Error fetching products' }, { status: 500 })
   }
 }
 
+// 2. POST: Create a new product
 export async function POST(req: Request) {
   try {
     const body = await req.json()
+    
     const newProduct = await prisma.product.create({
       data: {
         name: body.name,
         price: parseFloat(body.price),
         category: body.category,
+        stock: parseInt(body.stock),
         brand: body.brand,
-        stock: parseInt(body.stock), // <--- NEW: Save Stock
-        images: JSON.stringify(body.images)
+        images: body.images // Pass array directly
       }
     })
     return NextResponse.json(newProduct)
-  } catch (e) {
-    return NextResponse.json({ error: 'Failed to create' }, { status: 500 })
+  } catch (error) {
+    console.error(error)
+    return NextResponse.json({ error: 'Error creating product' }, { status: 500 })
   }
 }
 
+// 3. PUT: Update a product
 export async function PUT(req: Request) {
   try {
     const body = await req.json()
     const updated = await prisma.product.update({
-      where: { id: body.id },
-      data: {
-        name: body.name,
-        price: parseFloat(body.price),
-        category: body.category,
-        brand: body.brand,
-        stock: parseInt(body.stock), // <--- NEW: Update Stock
-        images: JSON.stringify(body.images)
-      }
+        where: { id: body.id },
+        data: {
+            name: body.name,
+            price: parseFloat(body.price),
+            stock: parseInt(body.stock),
+            category: body.category,
+            brand: body.brand,
+            images: body.images
+        }
     })
     return NextResponse.json(updated)
-  } catch (e) {
-    return NextResponse.json({ error: 'Failed to update' }, { status: 500 })
+  } catch (error) {
+    return NextResponse.json({ error: 'Error updating product' }, { status: 500 })
   }
 }
 
+// 4. DELETE: Remove a product
 export async function DELETE(req: Request) {
-  try {
     const { searchParams } = new URL(req.url)
     const id = searchParams.get('id')
-    if (id) {
-      await prisma.product.delete({ where: { id: parseInt(id) } })
-      return NextResponse.json({ success: true })
+
+    if(id) {
+        await prisma.product.delete({ where: { id: Number(id) }})
+        return NextResponse.json({ success: true })
     }
-    return NextResponse.json({ error: 'ID missing' }, { status: 400 })
-  } catch (e) {
-    return NextResponse.json({ error: 'Failed to delete' }, { status: 500 })
-  }
+    return NextResponse.json({ error: 'ID missing'}, { status: 400 })
 }
