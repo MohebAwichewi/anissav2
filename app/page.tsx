@@ -21,17 +21,20 @@ function ShopContent() {
   const [categories, setCategories] = useState<any[]>([]) 
   const [selectedCategory, setSelectedCategory] = useState('Tout Voir') 
   const [galleryImages, setGalleryImages] = useState<any[]>([])
+
+  // --- NEW: FILTER STATES ---
+  const [searchQuery, setSearchQuery] = useState('')
+  const [priceRange, setPriceRange] = useState(500) // Default max price
   
   // 4. Quantity State (For the selectors on product cards)
   const [selectedQtys, setSelectedQtys] = useState<{[key: number]: number}>({})
 
   // --- 5. LIGHTBOX STATES ---
-  // Simple Lightbox for Gallery Page
   const [lightboxOpen, setLightboxOpen] = useState<boolean>(false)
   const [currentLbImages, setCurrentLbImages] = useState<string[]>([]) 
   const [currentLbIndex, setCurrentLbIndex] = useState<number>(0)
 
-  // NEW: Quick View Modal State (Stores the full product object)
+  // NEW: Quick View Modal State
   const [quickViewProduct, setQuickViewProduct] = useState<any | null>(null)
 
   // 6. Forms (Checkout & Contact)
@@ -48,7 +51,14 @@ function ShopContent() {
   // --- DATA FETCHING ---
   useEffect(() => {
     setLoaded(true)
-    fetch('/api/products').then(r => r.json()).then(d => { if(Array.isArray(d)) setDbProducts(d) })
+    fetch('/api/products').then(r => r.json()).then(d => { 
+        if(Array.isArray(d)) {
+            setDbProducts(d)
+            // Auto-set max price based on most expensive product
+            const maxP = Math.max(...d.map((p: any) => p.price), 0)
+            if (maxP > 0) setPriceRange(maxP)
+        } 
+    })
     fetch('/api/categories').then(r => r.json()).then(d => { if(Array.isArray(d)) setCategories(d) })
     fetch('/api/gallery').then(r => r.json()).then(d => { if(Array.isArray(d)) setGalleryImages(d) })
     
@@ -75,7 +85,13 @@ function ShopContent() {
   const removeHover = () => document.body.classList.remove('hovering')
   const switchPage = (id: string) => { setActivePage(id); window.scrollTo(0, 0); setMobileMenuOpen(false) }
 
-  // --- SIMPLE LIGHTBOX ACTIONS (Gallery Page Only) ---
+  // --- NEW: HANDLE COLLECTION CLICK ---
+  const handleCategoryClick = (categoryName: string) => {
+    setSelectedCategory(categoryName)
+    switchPage('shop')
+  }
+
+  // --- SIMPLE LIGHTBOX ACTIONS ---
   const openLb = (images: string[]) => {
     setCurrentLbImages(images)
     setCurrentLbIndex(0)
@@ -144,7 +160,13 @@ function ShopContent() {
     setIsCheckingOut(false)
   }
 
-  const filteredProducts = selectedCategory === 'Tout Voir' ? dbProducts : dbProducts.filter(p => p.category === selectedCategory)
+  // --- FILTERING LOGIC (UPDATED) ---
+  const filteredProducts = dbProducts.filter(p => {
+      const matchCategory = selectedCategory === 'Tout Voir' ? true : p.category === selectedCategory
+      const matchSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase())
+      const matchPrice = p.price <= priceRange
+      return matchCategory && matchSearch && matchPrice
+  })
 
   return (
     <>
@@ -257,6 +279,11 @@ function ShopContent() {
         .qty-btn:hover { background:#eee; }
         .qty-val { flex:1; text-align:center; font-size:0.85rem; font-weight:600; }
 
+        /* NEW PRICE RANGE SLIDER STYLES */
+        .price-filter-container { margin-bottom: 20px; }
+        .price-header { display: flex; justify-content: space-between; font-size: 0.85rem; font-weight: 600; color: #1A3C34; margin-bottom: 8px; }
+        .price-range-input { width: 100%; cursor: pointer; accent-color: #1A3C34; }
+
         /* SIMPLE LIGHTBOX CSS */
         #lightbox { position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.95); z-index:10000; display:flex; align-items:center; justify-content:center; opacity:0; pointer-events:none; transition:0.3s; }
         #lightbox.active { opacity:1; pointer-events:auto; }
@@ -326,7 +353,7 @@ function ShopContent() {
 
         .arch-img-frame {
             width: 100%;
-            height: 400px;
+            aspect-ratio: 2/3;
             border-radius: 200px 200px 0 0; /* Arch Shape */
             overflow: hidden;
             margin-bottom: 25px;
@@ -373,7 +400,7 @@ function ShopContent() {
            
            /* Atelier Mobile */
            .atelier-grid { grid-template-columns: 1fr; gap: 60px; }
-           .arch-img-frame { height: 300px; }
+           .arch-img-frame { aspect-ratio: 3/4; }
            .marquee-text { font-size: 2.5rem; }
            
            /* Video Wall */
@@ -549,10 +576,10 @@ function ShopContent() {
           <section className="collections-section reveal-section">
             <div className="container"><div className="section-header"><span className="sub-title">Découverte</span><h2>Nos Collections</h2></div></div>
             <div className="scroll-container">
-              <div className="collection-card hover-trigger" onMouseEnter={addHover} onMouseLeave={removeHover}><img src="/image6.jpeg"/><div className="collection-overlay"><h3>Femme</h3></div></div>
-              <div className="collection-card hover-trigger" onMouseEnter={addHover} onMouseLeave={removeHover}><img src="/image3.jpeg"/><div className="collection-overlay"><h3>Homme</h3></div></div>
-              <div className="collection-card hover-trigger" onMouseEnter={addHover} onMouseLeave={removeHover}><img src="/image5.jpeg"/><div className="collection-overlay"><h3>Enfant</h3></div></div>
-              <div className="collection-card hover-trigger" onMouseEnter={addHover} onMouseLeave={removeHover}><img src="/image2.jpeg"/><div className="collection-overlay"><h3>Bébé</h3></div></div>
+              <div className="collection-card hover-trigger" onMouseEnter={addHover} onMouseLeave={removeHover} onClick={() => handleCategoryClick('Femme')}><img src="/image6.jpeg"/><div className="collection-overlay"><h3>Femme</h3></div></div>
+              <div className="collection-card hover-trigger" onMouseEnter={addHover} onMouseLeave={removeHover} onClick={() => handleCategoryClick('Homme')}><img src="/image3.jpeg"/><div className="collection-overlay"><h3>Homme</h3></div></div>
+              <div className="collection-card hover-trigger" onMouseEnter={addHover} onMouseLeave={removeHover} onClick={() => handleCategoryClick('Enfant')}><img src="/image5.jpeg"/><div className="collection-overlay"><h3>Enfant</h3></div></div>
+              <div className="collection-card hover-trigger" onMouseEnter={addHover} onMouseLeave={removeHover} onClick={() => handleCategoryClick('Bébé')}><img src="/image2.jpeg"/><div className="collection-overlay"><h3>Bébé</h3></div></div>
             </div>
           </section>
 
@@ -588,7 +615,8 @@ function ShopContent() {
                  <div className="atelier-grid">
                      <div className="atelier-card reveal-section">
                          <div className="arch-img-frame">
-                             <img src="/image5.jpeg" alt="Broderie" />
+                             {/* --- FIX: Changed image source as requested --- */}
+                             <img src="/image8.jpeg" alt="Broderie" />
                          </div>
                          <h3 className="atelier-title">Le Fil d'Or</h3>
                          <p className="atelier-desc">Chaque point est une promesse. Nos broderies sont réalisées à la main, perpétuant des gestes centenaires.</p>
@@ -635,7 +663,34 @@ function ShopContent() {
           
           <div className="container shop-container">
             <aside className="shop-sidebar">
-              <div className="filter-group"><h4>Rechercher</h4><input type="text" placeholder="Rechercher..." style={{width:'100%', padding:'15px', border:'1px solid #e0e0e0', borderRadius:'8px'}} /></div>
+              {/* --- SEARCH INPUT WITH STATE --- */}
+              <div className="filter-group">
+                  <h4>Rechercher</h4>
+                  <input 
+                      type="text" 
+                      placeholder="Rechercher..." 
+                      style={{width:'100%', padding:'15px', border:'1px solid #e0e0e0', borderRadius:'8px'}} 
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                  />
+              </div>
+
+              {/* --- PRICE FILTER SLIDER --- */}
+              <div className="filter-group">
+                  <div className="price-header">
+                      <span>Prix Max</span>
+                      <span>{priceRange} TND</span>
+                  </div>
+                  <input 
+                      type="range" 
+                      min="0" 
+                      max="1000" 
+                      value={priceRange} 
+                      onChange={(e) => setPriceRange(Number(e.target.value))}
+                      className="price-range-input"
+                  />
+              </div>
+
               <div className="filter-group"><h4>Catégories</h4><ul className="category-list"><li className={selectedCategory === 'Tout Voir' ? 'active' : ''}><a onClick={() => setSelectedCategory('Tout Voir')}>Tout Voir</a></li>{categories.map(c => (<li key={c.id} className={selectedCategory === c.name ? 'active' : ''}><a onClick={() => setSelectedCategory(c.name)}>{c.name}</a></li>))}</ul></div>
             </aside>
             <div className="shop-grid">
@@ -723,7 +778,7 @@ function ShopContent() {
               </div>
             </div>
             <div><h4>Maison</h4><ul className="footer-links" style={{listStyle:'none'}}><li><a onClick={() => switchPage('home')} className="hover-trigger" onMouseEnter={addHover} onMouseLeave={removeHover}>À Propos</a></li><li><a onClick={() => switchPage('gallery')} className="hover-trigger" onMouseEnter={addHover} onMouseLeave={removeHover}>Galerie</a></li></ul></div>
-            <div><h4>Aide</h4><ul className="footer-links" style={{listStyle:'none'}}><li><a onClick={() => switchPage('contact')} className="hover-trigger" onMouseEnter={addHover} onMouseLeave={removeHover}>Contact</a></li><li>Livraison</li></ul></div>
+            <div><h4>Aide</h4><ul className="footer-links" style={{listStyle:'none'}}><li><a onClick={() => switchPage('contact')}>Contact</a></li><li>Livraison</li></ul></div>
             <div><h4>Newsletter</h4><input type="email" placeholder="Votre email" className="newsletter-input hover-trigger" onMouseEnter={addHover} onMouseLeave={removeHover} /></div>
           </div>
           <div style={{textAlign:'center', marginTop:'80px', paddingTop:'30px', borderTop:'1px solid rgba(0,0,0,0.05)'}}>© 2025 M.A Tradition. Designed by Moheb.</div>

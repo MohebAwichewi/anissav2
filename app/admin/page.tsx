@@ -35,12 +35,11 @@ export default function AdminPage() {
   // --- SOUND & ALERT STATE ---
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [showNewOrderAlert, setShowNewOrderAlert] = useState(false)
-  // We use a ref to track order count so the interval can see the latest value without re-running
   const prevOrderCountRef = useRef(0)
 
-  // --- MODAL STATE ---
+  // --- GENERIC MODAL STATE (Handles Deletes for ALL types) ---
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
-  const [orderToDelete, setOrderToDelete] = useState<number | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<{id: number, type: 'order'|'product'|'category'|'gallery'} | null>(null)
 
   // --- FORMS ---
   const [isEditing, setIsEditing] = useState<number | null>(null)
@@ -53,7 +52,7 @@ export default function AdminPage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const galleryInputRef = useRef<HTMLInputElement>(null)
 
-  // --- 1. CHECK LOGIN ON LOAD ---
+  // --- 1. CHECK LOGIN ---
   useEffect(() => {
     const savedAuth = localStorage.getItem('ma_admin_auth')
     if (savedAuth === 'true') setIsLoggedIn(true)
@@ -62,32 +61,20 @@ export default function AdminPage() {
   // --- 2. FETCH DATA & START POLLING ---
   useEffect(() => {
     if (isLoggedIn) {
-        refreshData(true) // Initial load
-        
-        // POLL FOR NEW ORDERS EVERY 10 SECONDS
-        const interval = setInterval(() => {
-            refreshData(false) // Silent refresh
-        }, 10000)
-
+        refreshData(true)
+        const interval = setInterval(() => { refreshData(false) }, 10000)
         return () => clearInterval(interval)
     }
   }, [isLoggedIn])
 
-  // --- SOUND FUNCTION ---
   const triggerNewOrderAlarm = () => {
       if (audioRef.current) {
           setShowNewOrderAlert(true)
           audioRef.current.currentTime = 0
-          audioRef.current.loop = true // Start looping
+          audioRef.current.loop = true 
           audioRef.current.play().catch(e => console.log("Audio blocked", e))
-
-          // Stop after 6 seconds
           setTimeout(() => {
-              if(audioRef.current) {
-                  audioRef.current.pause()
-                  audioRef.current.loop = false
-                  audioRef.current.currentTime = 0
-              }
+              if(audioRef.current) { audioRef.current.pause(); audioRef.current.loop = false; audioRef.current.currentTime = 0 }
               setShowNewOrderAlert(false)
           }, 6000) 
       }
@@ -110,128 +97,80 @@ export default function AdminPage() {
         setMessages(data.messages || [])
       }
 
-      // ORDERS LOGIC
       const orderRes = await fetch('/api/orders')
       if (orderRes.ok) {
           const newOrders = await orderRes.json()
           setOrders(newOrders)
-          
-          // Check if new order arrived (count increased)
-          if (!isInitialLoad && newOrders.length > prevOrderCountRef.current) {
-              triggerNewOrderAlarm()
-          }
-          
-          // Update ref for next check
+          if (!isInitialLoad && newOrders.length > prevOrderCountRef.current) { triggerNewOrderAlarm() }
           prevOrderCountRef.current = newOrders.length
       }
-
     } catch (err) { console.error('Error fetching data:', err) }
   }
 
   // --- AUTH ---
   const handleLogin = async (e: FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-    setError('')
+    e.preventDefault(); setLoading(true); setError('')
     try {
-      const res = await fetch('/api/admin/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password })
-      })
+      const res = await fetch('/api/admin/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }) })
       const data = await res.json()
-      if (res.ok && data.success) {
-        setIsLoggedIn(true)
-        localStorage.setItem('ma_admin_auth', 'true')
-      }
+      if (res.ok && data.success) { setIsLoggedIn(true); localStorage.setItem('ma_admin_auth', 'true') }
       else setError('Mot de passe incorrect.')
     } catch (err) { setError('Erreur serveur.') }
     setLoading(false)
   }
+  const handleLogout = () => { localStorage.removeItem('ma_admin_auth'); window.location.reload() }
 
-  const handleLogout = () => {
-    localStorage.removeItem('ma_admin_auth')
-    window.location.reload()
+  // --- GENERIC DELETE LOGIC (REPLACES OLD FUNCTIONS) ---
+  const confirmDelete = (id: number, type: 'order'|'product'|'category'|'gallery') => {
+      setDeleteTarget({ id, type })
+      setDeleteModalOpen(true)
   }
 
-  // --- ORDERS ACTIONS ---
-  const initiateDeleteOrder = (id: number) => {
-    setOrderToDelete(id)
-    setDeleteModalOpen(true)
+  const executeDelete = async () => {
+      if (!deleteTarget) return
+      
+      const { id, type } = deleteTarget
+      let url = ''
+      
+      if (type === 'order') url = `/api/orders?id=${id}`
+      else if (type === 'product') url = `/api/products?id=${id}`
+      else if (type === 'category') url = `/api/categories?id=${id}`
+      else if (type === 'gallery') url = `/api/gallery?id=${id}`
+
+      await fetch(url, { method: 'DELETE' })
+      setDeleteModalOpen(false)
+      setDeleteTarget(null)
+      refreshData(true) // Refresh data immediately
   }
 
-  const confirmDeleteOrder = async () => {
-    if (orderToDelete) {
-        await fetch(`/api/orders?id=${orderToDelete}`, { method: 'DELETE' })
-        setDeleteModalOpen(false)
-        setOrderToDelete(null)
-        refreshData(true) // Reset count logic so alarm doesn't trigger on delete
-    }
-  }
-
+  // --- ORDERS LOGIC ---
   const toggleOrderStatus = async (order: any) => {
       const newStatus = order.status === 'En attente' ? 'Traité' : 'En attente'
-      await fetch('/api/orders', {
-          method: 'PUT',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ id: order.id, status: newStatus })
-      })
+      await fetch('/api/orders', { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ id: order.id, status: newStatus }) })
       refreshData(true)
   }
 
-  // --- GALLERY CRUD ---
+  // --- GALLERY LOGIC ---
   const handleGalleryUpload = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       Array.from(e.target.files).forEach(file => {
         const reader = new FileReader()
-        reader.onloadend = async () => {
-          await fetch('/api/gallery', {
-            method: 'POST',
-            body: JSON.stringify({ url: reader.result })
-          })
-          refreshData(true)
-        }
+        reader.onloadend = async () => { await fetch('/api/gallery', { method: 'POST', body: JSON.stringify({ url: reader.result }) }); refreshData(true) }
         reader.readAsDataURL(file)
       })
     }
   }
 
-  const deleteGalleryImage = async (id: number) => {
-    if (confirm('Supprimer cette photo ?')) {
-      await fetch(`/api/gallery?id=${id}`, { method: 'DELETE' })
-      refreshData(true)
-    }
-  }
-
-  // --- CATEGORY CRUD ---
+  // --- CATEGORY LOGIC ---
   const handleCategorySubmit = async (e: FormEvent) => {
-    e.preventDefault()
-    if (!catForm.name) return
-
-    if (editCatId) {
-      await fetch('/api/categories', {
-        method: 'PUT',
-        body: JSON.stringify({ id: editCatId, name: catForm.name })
-      })
-      setEditCatId(null)
-    } else {
-      await fetch('/api/categories', {
-        method: 'POST',
-        body: JSON.stringify({ name: catForm.name })
-      })
-    }
-    setCatForm({ name: '' })
-    refreshData(true)
+    e.preventDefault(); if (!catForm.name) return
+    const method = editCatId ? 'PUT' : 'POST'
+    const body = editCatId ? { id: editCatId, name: catForm.name } : { name: catForm.name }
+    await fetch('/api/categories', { method, body: JSON.stringify(body) })
+    setEditCatId(null); setCatForm({ name: '' }); refreshData(true)
   }
 
-  const deleteCategory = async (id: number) => {
-    if (confirm('Supprimer cette catégorie ?')) {
-      await fetch(`/api/categories?id=${id}`, { method: 'DELETE' })
-      refreshData(true)
-    }
-  }
-
-  // --- PRODUCT CRUD ---
+  // --- PRODUCT LOGIC ---
   const handleProductImageUpload = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       Array.from(e.target.files).forEach(file => {
@@ -241,57 +180,25 @@ export default function AdminPage() {
       })
     }
   }
-
   const handleSubmitProduct = async (e: FormEvent) => {
-    e.preventDefault()
-    if (!prodForm.name || !prodForm.price) return alert('Champs manquants')
-
+    e.preventDefault(); if (!prodForm.name || !prodForm.price) return alert('Champs manquants')
     const method = isEditing ? 'PUT' : 'POST'
     const body = isEditing ? { id: isEditing, ...prodForm } : prodForm
-
-    await fetch('/api/products', {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    })
-
-    if (!isEditing) {
-      setProdForm({ name: '', price: '', stock: '10', category: '', brand: 'M.A Tradition', images: [] })
-      if(fileInputRef.current) fileInputRef.current.value = ''
-    }
-    setIsEditing(null)
-    refreshData(true)
-    setActiveTab('products') 
+    await fetch('/api/products', { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    if (!isEditing) { setProdForm({ name: '', price: '', stock: '10', category: '', brand: 'M.A Tradition', images: [] }); if(fileInputRef.current) fileInputRef.current.value = '' }
+    setIsEditing(null); refreshData(true); setActiveTab('products') 
   }
-
   const startEdit = (product: any) => {
     setIsEditing(product.id)
-    setProdForm({ 
-      name: product.name, 
-      price: product.price.toString(), 
-      stock: product.stock ? product.stock.toString() : '10',
-      category: product.category, 
-      brand: product.brand || 'M.A Tradition', 
-      images: product.images || []
-    })
+    setProdForm({ name: product.name, price: product.price.toString(), stock: product.stock ? product.stock.toString() : '10', category: product.category, brand: product.brand || 'M.A Tradition', images: product.images || [] })
     setActiveTab('add-product')
-  }
-
-  const deleteProduct = async (id: number) => {
-    if(confirm('Supprimer ce produit ?')) {
-      await fetch(`/api/products?id=${id}`, { method: 'DELETE' })
-      refreshData(true)
-    }
   }
 
   // --- LOGIN UI ---
   if (!isLoggedIn) {
     return (
       <div className="admin-wrapper login-mode">
-        <style jsx global>{`
-          .admin-wrapper, .admin-wrapper * { cursor: default !important; }
-          .admin-wrapper a, .admin-wrapper button, .admin-wrapper .cursor-pointer { cursor: pointer !important; }
-        `}</style>
+        <style jsx global>{` .admin-wrapper, .admin-wrapper * { cursor: default !important; } .admin-wrapper a, .admin-wrapper button, .admin-wrapper .cursor-pointer { cursor: pointer !important; } `}</style>
         <div className="login-box">
           <div className="logo">M.A Admin</div>
           <p>Espace sécurisé</p>
@@ -301,15 +208,7 @@ export default function AdminPage() {
             <button disabled={loading}>{loading ? '...' : 'Connexion'}</button>
           </form>
         </div>
-        <style jsx>{`
-          .login-mode { height: 100vh; display: flex; align-items: center; justify-content: center; background: #f3f4f6; }
-          .login-box { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); width: 100%; max-width: 400px; text-align: center; }
-          .logo { font-size: 1.5rem; font-weight: 700; color: #111827; margin-bottom: 10px; }
-          input { width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 6px; margin-bottom: 16px; font-size: 0.95rem; }
-          button { width: 100%; padding: 12px; background: #2563eb; color: white; border: none; border-radius: 6px; font-weight: 500; transition: 0.2s; }
-          button:hover { background: #1d4ed8; }
-          .error-msg { color: #ef4444; font-size: 0.85rem; margin-bottom: 12px; }
-        `}</style>
+        <style jsx>{` .login-mode { height: 100vh; display: flex; align-items: center; justify-content: center; background: #f3f4f6; } .login-box { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); width: 100%; max-width: 400px; text-align: center; } .logo { font-size: 1.5rem; font-weight: 700; color: #111827; margin-bottom: 10px; } input { width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 6px; margin-bottom: 16px; font-size: 0.95rem; } button { width: 100%; padding: 12px; background: #2563eb; color: white; border: none; border-radius: 6px; font-weight: 500; transition: 0.2s; } button:hover { background: #1d4ed8; } .error-msg { color: #ef4444; font-size: 0.85rem; margin-bottom: 12px; } `}</style>
       </div>
     )
   }
@@ -323,33 +222,22 @@ export default function AdminPage() {
       {/* NEW ORDER NOTIFICATION TOAST */}
       <div className={`new-order-toast ${showNewOrderAlert ? 'show' : ''}`}>
           <div className="bell-icon"><Icons.Bell /></div>
-          <div>
-              <strong>Nouvelle Commande !</strong>
-              <div style={{fontSize:'0.85rem', opacity:0.9}}>Vérifiez l'onglet Commandes</div>
-          </div>
+          <div><strong>Nouvelle Commande !</strong><div style={{fontSize:'0.85rem', opacity:0.9}}>Vérifiez l'onglet Commandes</div></div>
       </div>
 
-      <style jsx global>{`
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-        .admin-wrapper { font-family: 'Inter', sans-serif; background: #f3f4f6; min-height: 100vh; display: flex; }
-        .admin-wrapper * { cursor: default !important; box-sizing: border-box; }
-        .admin-wrapper button, .admin-wrapper a, .admin-wrapper .clickable { cursor: pointer !important; }
-      `}</style>
+      <style jsx global>{` @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap'); .admin-wrapper { font-family: 'Inter', sans-serif; background: #f3f4f6; min-height: 100vh; display: flex; } .admin-wrapper * { cursor: default !important; box-sizing: border-box; } .admin-wrapper button, .admin-wrapper a, .admin-wrapper .clickable { cursor: pointer !important; } `}</style>
 
       <aside className="sidebar">
         <div className="brand">M.A <span style={{color:'#3b82f6'}}>Admin</span></div>
         <nav className="nav-menu">
           <button className={`nav-item ${activeTab === 'overview' ? 'active' : ''}`} onClick={() => setActiveTab('overview')}><Icons.Dashboard /> Dashboard</button>
-          
           <div className="nav-label">Commandes</div>
           <button className={`nav-item ${activeTab === 'orders' ? 'active' : ''}`} onClick={() => setActiveTab('orders')}><Icons.Bag /> Commandes</button>
-
           <div className="nav-label">Gestion</div>
           <button className={`nav-item ${activeTab === 'categories' ? 'active' : ''}`} onClick={() => setActiveTab('categories')}><Icons.List /> Catégories</button>
           <button className={`nav-item ${activeTab === 'add-product' ? 'active' : ''}`} onClick={() => { setIsEditing(null); setActiveTab('add-product'); }}><Icons.Plus /> Ajouter Produit</button>
           <button className={`nav-item ${activeTab === 'products' ? 'active' : ''}`} onClick={() => setActiveTab('products')}><Icons.Product /> Liste Produits</button>
           <button className={`nav-item ${activeTab === 'gallery' ? 'active' : ''}`} onClick={() => setActiveTab('gallery')}><Icons.Image /> Galerie</button>
-          
           <div className="nav-label">Système</div>
           <button className={`nav-item ${activeTab === 'messages' ? 'active' : ''}`} onClick={() => setActiveTab('messages')}><Icons.Mail /> Messages</button>
           <button className="nav-item logout" onClick={handleLogout}><Icons.Logout /> Déconnexion</button>
@@ -375,53 +263,25 @@ export default function AdminPage() {
                 <h1 className="page-title">Commandes Clients</h1>
                 <div className="card">
                     <table className="clean-table">
-                        <thead>
-                            <tr>
-                                <th>ID</th>
-                                <th>Client</th>
-                                <th style={{width: '40%'}}>Articles</th>
-                                <th>Total</th>
-                                <th>Date</th>
-                                <th>Statut</th>
-                                <th>Action</th>
-                            </tr>
-                        </thead>
+                        <thead><tr><th>ID</th><th>Client</th><th style={{width: '40%'}}>Articles</th><th>Total</th><th>Date</th><th>Statut</th><th>Action</th></tr></thead>
                         <tbody>
                             {orders.map(order => (
                                 <tr key={order.id}>
                                     <td>#{order.id}</td>
+                                    <td><div className="fw-600">{order.customer.split('|')[0]}</div><div className="sub-text">{order.customer.split('|')[1]}</div></td>
                                     <td>
-                                        <div className="fw-600">{order.customer.split('|')[0]}</div>
-                                        <div className="sub-text">{order.customer.split('|')[1]}</div>
-                                    </td>
-                                    <td>
-                                        {/* JSON Parser for Items */}
                                         {(() => {
                                             try {
                                                 const items = JSON.parse(order.item);
-                                                return (
-                                                    <div style={{display:'flex', flexDirection:'column', gap:'8px'}}>
-                                                        {items.map((i: any, idx: number) => (
-                                                            <div key={idx} style={{display:'flex', alignItems:'center', gap:'12px'}}>
-                                                                <img src={i.images && i.images[0] ? i.images[0] : '/placeholder.jpg'} style={{width:'40px', height:'40px', borderRadius:'4px', objectFit:'cover', border:'1px solid #eee'}} />
-                                                                <span style={{fontSize:'0.9rem', color:'#374151'}}><strong>{i.quantity}x</strong> {i.name}</span>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                )
+                                                return (<div style={{display:'flex', flexDirection:'column', gap:'8px'}}>{items.map((i: any, idx: number) => (<div key={idx} style={{display:'flex', alignItems:'center', gap:'12px'}}><img src={i.images && i.images[0] ? i.images[0] : '/placeholder.jpg'} style={{width:'40px', height:'40px', borderRadius:'4px', objectFit:'cover', border:'1px solid #eee'}} /><span style={{fontSize:'0.9rem', color:'#374151'}}><strong>{i.quantity}x</strong> {i.name}</span></div>))}</div>)
                                             } catch (e) { return <span>{order.item}</span> }
                                         })()}
                                     </td>
                                     <td className="fw-600">{order.total} TND</td>
                                     <td>{new Date(order.date).toLocaleDateString()}</td>
-                                    <td>
-                                        <span className={`status-badge clickable ${order.status === 'Traité' ? 'success' : 'warning'}`} onClick={() => toggleOrderStatus(order)}>
-                                            {order.status}
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <button className="icon-btn trash clickable" onClick={() => initiateDeleteOrder(order.id)}><Icons.Trash /></button>
-                                    </td>
+                                    <td><span className={`status-badge clickable ${order.status === 'Traité' ? 'success' : 'warning'}`} onClick={() => toggleOrderStatus(order)}>{order.status}</span></td>
+                                    {/* USE GENERIC MODAL */}
+                                    <td><button className="icon-btn trash clickable" onClick={() => confirmDelete(order.id, 'order')}><Icons.Trash /></button></td>
                                 </tr>
                             ))}
                             {orders.length === 0 && <tr><td colSpan={7} style={{textAlign:'center', color:'#888'}}>Aucune commande trouvée.</td></tr>}
@@ -431,7 +291,7 @@ export default function AdminPage() {
             </div>
         )}
 
-        {/* ... (Rest of Tabs: Gallery, Categories, etc. - KEPT SAME) ... */}
+        {/* GALLERY */}
         {activeTab === 'gallery' && (
           <div className="fade-in">
             <h1 className="page-title">Gérer la Galerie</h1>
@@ -443,12 +303,15 @@ export default function AdminPage() {
                 </div>
                 <div className="gallery-grid-admin">
                   {gallery.map(img => (
-                    <div key={img.id} className="gal-item"><img src={img.url} /><button className="del-btn clickable" onClick={() => deleteGalleryImage(img.id)}>🗑</button></div>
+                    // USE GENERIC MODAL
+                    <div key={img.id} className="gal-item"><img src={img.url} /><button className="del-btn clickable" onClick={() => confirmDelete(img.id, 'gallery')}>🗑</button></div>
                   ))}
                 </div>
             </div>
           </div>
         )}
+
+        {/* CATEGORIES */}
         {activeTab === 'categories' && (
           <div className="fade-in">
             <h1 className="page-title">Gérer les Catégories</h1>
@@ -467,7 +330,8 @@ export default function AdminPage() {
                       <td>
                         <div className="actions">
                           <button className="icon-btn edit clickable" onClick={() => {setEditCatId(c.id); setCatForm({name: c.name})}}><Icons.Edit /></button>
-                          <button className="icon-btn trash clickable" onClick={() => deleteCategory(c.id)}><Icons.Trash /></button>
+                          {/* USE GENERIC MODAL */}
+                          <button className="icon-btn trash clickable" onClick={() => confirmDelete(c.id, 'category')}><Icons.Trash /></button>
                         </div>
                       </td>
                     </tr>
@@ -477,6 +341,8 @@ export default function AdminPage() {
             </div>
           </div>
         )}
+
+        {/* ADD PRODUCT */}
         {activeTab === 'add-product' && (
           <div className="fade-in">
             <h1 className="page-title">{isEditing ? 'Modifier Produit' : 'Ajouter un Produit'}</h1>
@@ -515,6 +381,8 @@ export default function AdminPage() {
             </div>
           </div>
         )}
+
+        {/* LIST PRODUCTS */}
         {activeTab === 'products' && (
           <div className="fade-in">
              <div className="flex-between"><h1 className="page-title">Produits</h1><button className="btn-primary clickable" onClick={() => {setIsEditing(null); setActiveTab('add-product');}}><Icons.Plus /> Nouveau</button></div>
@@ -529,7 +397,13 @@ export default function AdminPage() {
                        <td><span className="badge bg-gray">{p.category}</span></td>
                        <td>{p.price} TND</td>
                        <td style={{fontWeight:'bold', color:'#2563eb'}}>{p.stock}</td>
-                       <td><div className="actions"><button className="icon-btn edit clickable" onClick={() => startEdit(p)}><Icons.Edit /></button><button className="icon-btn trash clickable" onClick={() => deleteProduct(p.id)}><Icons.Trash /></button></div></td>
+                       <td>
+                         <div className="actions">
+                           <button className="icon-btn edit clickable" onClick={() => startEdit(p)}><Icons.Edit /></button>
+                           {/* USE GENERIC MODAL */}
+                           <button className="icon-btn trash clickable" onClick={() => confirmDelete(p.id, 'product')}><Icons.Trash /></button>
+                         </div>
+                       </td>
                      </tr>
                    ))}
                  </tbody>
@@ -537,6 +411,8 @@ export default function AdminPage() {
              </div>
           </div>
         )}
+
+        {/* MESSAGES */}
         {activeTab === 'messages' && (
            <div className="fade-in">
              <h1 className="page-title">Messages</h1>
@@ -550,18 +426,21 @@ export default function AdminPage() {
         )}
       </main>
 
-      {/* --- CUSTOM DELETE MODAL --- */}
-      {deleteModalOpen && (
+      {/* --- CUSTOM GENERIC DELETE MODAL --- */}
+      {deleteModalOpen && deleteTarget && (
         <div className="modal-overlay">
             <div className="modal-box">
-                <div className="modal-icon-wrapper">
-                    <Icons.Alert />
-                </div>
-                <h3 className="modal-title">Supprimer cette commande ?</h3>
-                <p className="modal-desc">Cette action est irréversible. La commande sera définitivement supprimée de la base de données.</p>
+                <div className="modal-icon-wrapper"><Icons.Alert /></div>
+                <h3 className="modal-title">
+                    {deleteTarget.type === 'order' && 'Supprimer cette commande ?'}
+                    {deleteTarget.type === 'product' && 'Supprimer ce produit ?'}
+                    {deleteTarget.type === 'category' && 'Supprimer cette catégorie ?'}
+                    {deleteTarget.type === 'gallery' && 'Supprimer cette photo ?'}
+                </h3>
+                <p className="modal-desc">Cette action est irréversible.</p>
                 <div className="modal-actions">
                     <button className="btn-modal btn-cancel" onClick={() => setDeleteModalOpen(false)}>Annuler</button>
-                    <button className="btn-modal btn-confirm" onClick={confirmDeleteOrder}>Supprimer</button>
+                    <button className="btn-modal btn-confirm" onClick={executeDelete}>Supprimer</button>
                 </div>
             </div>
         </div>
